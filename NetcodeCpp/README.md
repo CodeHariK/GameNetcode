@@ -49,3 +49,11 @@ mismatch the client snaps to the server state and replays pending inputs.
 
 - Files: `src/game/{Simulation,InputHistory}`
 - Test:  `make test` (adds prediction_test)  |  Run: `make run`
+
+## Milestone 6 - Bit packing & delta compression
+Snapshots are bit-packed and delta-encoded against a baseline the client has
+acknowledged: one changed-bit per field, quantized values, colours collapse to a
+bit. Big bandwidth win. `BitWriter`/`BitReader` do the packing.
+
+- Files: `src/net/BitStream`, `src/game/DeltaSnapshot`
+- Test:  `make test` (adds bitstream_test, delta_test)

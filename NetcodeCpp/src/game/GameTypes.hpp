@@ -42,6 +42,7 @@ struct PlayerInput {
 // Header preceding an array of redundant PlayerInputs in a datagram.
 struct InputBatchHeader {
     uint32_t input_count{0};
+    uint32_t ack_server_tick{0};  // newest snapshot tick the client decoded (delta baseline)
 };
 
 // Server -> Client: header before an array of EntityState. last_client_input_tick
