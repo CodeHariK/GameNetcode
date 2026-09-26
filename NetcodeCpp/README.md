@@ -81,3 +81,10 @@ bad network. Configured by env vars; both sides can be impaired.
 
 - Files: `src/game/SimConfig` (+ Connection hook)
 - Test:  `make test` (adds netsim_test)  |  Run: `make run-sim`
+
+## Learning guides
+Each concept has a short guide in `docs/` (start with `docs/00-overview.md`), plus
+`docs/CODE_REVIEW.md`. Compare any two milestones with git, e.g.:
+
+    git diff m05-prediction m06-compression -- src/apps/client.cpp
+    git worktree add ../m5 m05-prediction   # run an older milestone side-by-side
