@@ -17,3 +17,11 @@ network simulator that injects latency / jitter / loss / duplication for tests.
 
 - Files: `src/net/{Address,Socket,NetworkSimulator}`, `src/core/Timer.hpp`
 - Test:  `make test`
+
+## Milestone 2 - Virtual connection & reliability
+12-byte packet header (protocol id, sequence, ack, ack-bits), Glenn Fiedler's
+sliding-window acks, RTT + packet-loss estimation, and a Connection state machine
+with heartbeats and timeouts.
+
+- Files: `src/net/{PacketHeader,ReliabilitySystem,Connection}`
+- Test:  `make test` (adds protocol_test)
