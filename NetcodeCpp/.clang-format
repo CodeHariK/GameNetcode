@@ -1,0 +1,29 @@
+# Style for game-netcode.
+# Base is Google, adjusted to match this codebase: 4-space indent, un-indented
+# namespaces, and — per project preference — one parameter per line whenever a
+# function signature or call has to wrap (parameters/arguments are never bin-packed).
+---
+Language: Cpp
+BasedOnStyle: Google
+
+IndentWidth: 4
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+NamespaceIndentation: None
+ColumnLimit: 100
+
+PointerAlignment: Left
+DerivePointerAlignment: false
+
+# One parameter/argument per line when wrapping (the project preference).
+BinPackParameters: false
+BinPackArguments: false
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowAllArgumentsOnNextLine: false
+AlignAfterOpenBracket: Align
+
+# Keep short constructs compact and readable.
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+SortIncludes: false
