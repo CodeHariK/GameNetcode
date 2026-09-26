@@ -57,3 +57,11 @@ bit. Big bandwidth win. `BitWriter`/`BitReader` do the packing.
 
 - Files: `src/net/BitStream`, `src/game/DeltaSnapshot`
 - Test:  `make test` (adds bitstream_test, delta_test)
+
+## Milestone 7 - Lag compensation (hit rewind)
+The server records a short history of every entity per tick. When a shot arrives
+stamped with the tick the shooter was viewing, the server rewinds the world to
+that moment and hit-tests there, so hits that look fair on a laggy client count.
+
+- Files: `src/game/LagCompensation`
+- Test:  `make test` (adds lagcomp_test)  |  Run: `make run` (client fires at a bot)

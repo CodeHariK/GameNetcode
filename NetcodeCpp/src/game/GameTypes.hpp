@@ -4,14 +4,19 @@
 
 namespace game {
 
-// Static channel assignment (see net/ channels).
-enum Channels : uint8_t {
-    CH_UNRELIABLE = 0,  // unordered (effects, audio)
-    CH_STATE = 1,       // sequenced (snapshots down, input up)
-    CH_RELIABLE = 2,    // ordered (chat, spawn/despawn, RPCs)
+// Reliable-channel message tags (1 byte prefix).
+enum ReliableMsgType : uint8_t {
+    MSG_FIRE = 1,  // Client -> Server FireCommand
+    MSG_HIT = 2,   // Server -> Client HitNotification
 };
 
-// 2D vector for movement / interpolation.
+// Static channel assignment (see net/ channels).
+enum Channels : uint8_t {
+    CH_UNRELIABLE = 0,
+    CH_STATE = 1,
+    CH_RELIABLE = 2,
+};
+
 struct Vec2 {
     float x{0.0f};
     float y{0.0f};
@@ -31,7 +36,6 @@ struct EntityState {
     uint32_t color_rgb{0xFFFFFF};
 };
 
-// Client -> Server: one player input for a given client tick.
 struct PlayerInput {
     uint32_t tick{0};
     float move_x{0.0f};
@@ -39,18 +43,36 @@ struct PlayerInput {
     uint32_t buttons{0};
 };
 
-// Header preceding an array of redundant PlayerInputs in a datagram.
 struct InputBatchHeader {
     uint32_t input_count{0};
     uint32_t ack_server_tick{0};  // newest snapshot tick the client decoded (delta baseline)
 };
 
-// Server -> Client: header before an array of EntityState. last_client_input_tick
-// tells the client which of its inputs the server has processed (for reconciliation).
 struct SnapshotHeader {
     uint32_t server_tick{0};
     uint32_t last_client_input_tick{0};
     uint32_t entity_count{0};
+};
+
+// Client -> Server: a hitscan shot. origin is the shooter's position; aim is the
+// (un-normalized) aim direction; view_server_tick is the snapshot the shooter saw
+// so the server can rewind the world to it (lag compensation).
+struct FireCommand {
+    uint32_t client_tick{0};
+    uint32_t view_server_tick{0};
+    float origin_x{0.0f};
+    float origin_y{0.0f};
+    float aim_x{0.0f};
+    float aim_y{0.0f};
+};
+
+// Server -> Client: authoritative result of a FireCommand after rewinding.
+struct HitNotification {
+    uint32_t client_tick{0};
+    uint8_t hit{0};
+    uint32_t target_id{0};
+    float point_x{0.0f};
+    float point_y{0.0f};
 };
 #pragma pack(pop)
 
