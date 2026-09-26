@@ -27,3 +27,29 @@ Two things Go gives us for free (nice teaching notes):
   heartbeats and timeouts, carrying raw payloads (channels come in m03).
 - protocol_test.go - sequence wrap, header round-trip + bad magic, ackBits, RTT
   from acks, and a full loopback handshake.
+
+## Milestone 3 — Channels (delivery guarantees)
+
+Different game data wants different guarantees, so the connection multiplexes three
+channels into one UDP datagram, each with its own policy:
+
+- channel.go — the `Channel` interface, the `Message` type, the 5-byte per-message
+  wire header (channel id, message id, size), and `ChannelType`.
+- channel_unreliable.go — UnreliableUnordered: fire and forget (VoIP, effects).
+- channel_sequenced.go — UnreliableSequenced: drop anything older than the newest
+  seen (entity positions, camera, analog input).
+- channel_reliable.go — ReliableOrdered: retransmit on an RTT timer until acked,
+  and buffer out-of-order arrivals to deliver them strictly in order (chat, spawns,
+  phase changes).
+- connection.go — upgraded with RegisterChannel / SendMessage / ReceiveMessage,
+  FlushChannels (pack pending messages behind one reliability header) and
+  unpackChannels (route each received slice to its channel). The m02 ack callback is
+  fanned out to channels, so ReliableOrdered stops retransmitting once its packet is
+  acked.
+- channel_test.go — unordered delivery, sequenced drop-older, reliable reassembly,
+  reliable ack+retransmit, and a full loopback end-to-end reliable delivery.
+
+Go vs C++ notes: the abstract `Channel` base becomes a Go interface; ReliableOrdered
+uses maps (message id -> in-flight message, packet seq -> message ids) instead of
+`std::map`, and retransmits lowest ids first via a wrap-aware sort so the receiver
+fills its gaps in order.

@@ -16,7 +16,7 @@ Read the guides in order; each links to the code in both languages.
 |---|---------|-----|----|
 | 01 | [Sockets & network simulator](01-sockets.md) | done | done |
 | 02 | [Virtual connection & reliability](02-connection.md) | done | done |
-| 03 | [Channels (delivery guarantees)](03-channels.md) | done | — |
+| 03 | [Channels (delivery guarantees)](03-channels.md) | done | done |
 | 04 | [Authoritative server & snapshots](04-snapshots.md) | done | — |
 | 05 | [Client prediction & reconciliation](05-prediction.md) | done | — |
 | 06 | [Bit packing & delta compression](06-compression.md) | done | — |
