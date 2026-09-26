@@ -41,3 +41,11 @@ motion despite the low send rate. First runnable demo: `make run`.
 
 - Files: `src/game/{GameTypes,SnapshotBuffer}`, `src/apps/{server,client}`
 - Run:   `make run`
+
+## Milestone 5 - Client prediction & reconciliation
+The client applies input immediately (zero latency) and records it. The server is
+authoritative and stamps each snapshot with the last input it processed. On a
+mismatch the client snaps to the server state and replays pending inputs.
+
+- Files: `src/game/{Simulation,InputHistory}`
+- Test:  `make test` (adds prediction_test)  |  Run: `make run`
