@@ -33,3 +33,11 @@ in-order). Connection now packs/unpacks channel messages.
 
 - Files: `src/net/{Channel,ChannelTypes,UnreliableUnordered,UnreliableSequenced,ReliableOrdered}Channel`
 - Test:  `make test` (adds channel_test)
+
+## Milestone 4 - Authoritative server & snapshots
+The server simulates the world at 60Hz and broadcasts raw snapshots at 20Hz. The
+client buffers snapshots and interpolates entities ~100ms in the past for smooth
+motion despite the low send rate. First runnable demo: `make run`.
+
+- Files: `src/game/{GameTypes,SnapshotBuffer}`, `src/apps/{server,client}`
+- Run:   `make run`
