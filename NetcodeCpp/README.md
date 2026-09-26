@@ -65,3 +65,11 @@ that moment and hit-tests there, so hits that look fair on a laggy client count.
 
 - Files: `src/game/LagCompensation`
 - Test:  `make test` (adds lagcomp_test)  |  Run: `make run` (client fires at a bot)
+
+## Milestone 8 - Interest management (area of interest)
+Each client is only sent the entities within an interest radius of its player, so
+bandwidth scales with what a player can see, not the world size. Delta baselines
+become per-client (the exact visible subset each client acked).
+
+- Files: `src/game/InterestManagement`
+- Test:  `make test` (adds aoi_test)  |  Run: `make run` (client Visible count rises/falls)

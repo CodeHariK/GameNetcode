@@ -19,8 +19,9 @@
 #include <string>
 #include <vector>
 
-// Milestone 7: the client fires at where it SEES the target and stamps the shot
-// with the tick it was viewing; the server rewinds to make the hit fair.
+// Milestone 8: with AOI, the visible set changes as entities enter/leave range,
+// so the client re-targets the nearest visible entity each snapshot and reports
+// how many entities it can currently see.
 
 namespace {
 std::atomic<bool> g_running{true};
@@ -80,7 +81,7 @@ int main(int argc, char* argv[]) {
     conn.create_channel<netcode::UnreliableSequencedChannel>(game::CH_STATE);
     conn.create_channel<netcode::ReliableOrderedChannel>(game::CH_RELIABLE);
 
-    std::cout << "=== Game Netcode Client (Milestone 7: lag compensation) ===\n";
+    std::cout << "=== Game Netcode Client (Milestone 8: interest management) ===\n";
     std::cout << "Connecting to " << server_addr.to_string() << "\n";
 
     double current_time = netcode::Timer::now_seconds();
@@ -96,6 +97,7 @@ int main(int argc, char* argv[]) {
 
     bool target_known = false;
     game::Vec2 target_seen{0.0f, 0.0f};
+    size_t visible_count = 0;
     uint32_t shots_fired = 0, shots_hit = 0;
 
     double accumulator = 0.0, last_stat = current_time, last_fire = current_time;
@@ -142,13 +144,21 @@ int main(int argc, char* argv[]) {
 
                     const game::EntityState* server_player =
                         find_local_entity(entities, local_entity_id);
+                    visible_count = entities.size();
+
+                    // Nearest visible entity that isn't us (re-evaluated per snapshot).
                     target_known = false;
                     if (server_player) {
+                        float best_d2 = 0.0f;
                         for (const auto& e : entities) {
-                            if (e.entity_id != local_entity_id) {
+                            if (e.entity_id == local_entity_id) continue;
+                            const float dx = e.position.x - server_player->position.x;
+                            const float dy = e.position.y - server_player->position.y;
+                            const float d2 = dx * dx + dy * dy;
+                            if (!target_known || d2 < best_d2) {
                                 target_known = true;
+                                best_d2 = d2;
                                 target_seen = e.position;
-                                break;
                             }
                         }
                     }
@@ -208,7 +218,8 @@ int main(int argc, char* argv[]) {
             std::cout << "[Client] Tick: " << client_tick
                       << " | Ping: " << static_cast<int>(conn.rtt_ms())
                       << "ms | Reconciliations: " << total_reconciliations << " | Shots: "
-                      << shots_fired << " Hits: " << shots_hit << " (" << pct << "%)\n";
+                      << shots_fired << " Hits: " << shots_hit << " (" << pct << "%) | Visible: "
+                      << visible_count << "\n";
             last_stat = current_time;
         }
         netcode::Timer::sleep_ms(1.0);

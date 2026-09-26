@@ -1,6 +1,7 @@
 #include "core/Timer.hpp"
 #include "game/DeltaSnapshot.hpp"
 #include "game/GameTypes.hpp"
+#include "game/InterestManagement.hpp"
 #include "game/LagCompensation.hpp"
 #include "game/Simulation.hpp"
 #include "net/Connection.hpp"
@@ -9,6 +10,7 @@
 #include "net/UnreliableSequencedChannel.hpp"
 #include "net/UnreliableUnorderedChannel.hpp"
 
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <csignal>
@@ -20,24 +22,44 @@
 #include <unordered_map>
 #include <vector>
 
-// Milestone 7: adds lag compensation. The server records the full world every
-// tick; when a client fires (reliable channel) it stamps the shot with the tick
-// it was viewing, and the server rewinds to that tick before hit-testing.
+// Milestone 8: area-of-interest culling. Several bots roam; each client is sent
+// only the entities near its player, and its delta baseline becomes the exact
+// visible subset it last acknowledged (stored per client). The full-world rewind
+// buffer for lag comp is kept separately, so hit tests stay fair.
 
 namespace {
 std::atomic<bool> g_running{true};
 void handle_signal(int) { g_running = false; }
 
 constexpr size_t MAX_SNAPSHOT_HISTORY = 128;
-constexpr uint32_t BOT_ID = 1000;
+constexpr uint32_t BOT_BASE_ID = 1000;
+constexpr int NUM_BOTS = 6;
 constexpr float HIT_RADIUS = 3.0f;
+constexpr float AOI_RADIUS = 35.0f;
+constexpr size_t AOI_MAX_ENTITIES = 16;
 constexpr double INTERP_DELAY = 0.100;
+
+struct BotSpec {
+    float amplitude;
+    float frequency;
+    float phase;
+    float lane_y;
+};
+constexpr std::array<BotSpec, NUM_BOTS> kBots = {{
+    {60.0f, 2.0f, 0.0f, 0.0f},
+    {50.0f, 1.5f, 1.0f, 22.0f},
+    {40.0f, 2.5f, 2.0f, -22.0f},
+    {55.0f, 1.2f, 3.0f, 45.0f},
+    {45.0f, 1.8f, 4.0f, -45.0f},
+    {35.0f, 2.2f, 5.0f, 15.0f},
+}};
 
 struct ClientSession {
     std::unique_ptr<netcode::Connection> connection;
     uint32_t entity_id{0};
     uint32_t last_processed_input_tick{0};
     uint32_t baseline_tick{0};
+    std::map<uint32_t, std::vector<game::EntityState>> sent_history;  // per-client baselines
 };
 }  // namespace
 
@@ -51,25 +73,27 @@ int main(int argc, char* argv[]) {
     netcode::Socket socket;
     if (!socket.open(port)) return 1;
 
-    std::cout << "=== Game Netcode Server (Milestone 7: lag compensation) ===\n";
+    std::cout << "=== Game Netcode Server (Milestone 8: interest management) ===\n";
     std::cout << "Listening on port " << port << "\n";
 
     std::unordered_map<netcode::Address, ClientSession> clients;
     std::unordered_map<uint32_t, game::EntityState> world;
-    std::map<uint32_t, std::vector<game::EntityState>> snapshot_history;
     game::WorldHistory world_history(128);
     uint32_t next_entity_id = 1;
 
-    // A fast-moving target bot to shoot at.
-    world[BOT_ID] = game::EntityState{BOT_ID, {0.0f, 0.0f}, {0.0f, 0.0f}, 0xFF00FF};
+    for (int i = 0; i < NUM_BOTS; ++i) {
+        const uint32_t id = BOT_BASE_ID + static_cast<uint32_t>(i);
+        world[id] = game::EntityState{id, {0.0f, kBots[i].lane_y}, {0.0f, 0.0f}, 0xFF00FF};
+    }
 
     const double tick_dt = 1.0 / 60.0;
     const uint32_t SNAPSHOT_RATE = 3;
     uint32_t server_tick = 0;
+    uint64_t vis_sum = 0, vis_count = 0;
 
     double current_time = netcode::Timer::now_seconds();
     const double start_time = current_time;
-    double accumulator = 0.0;
+    double accumulator = 0.0, last_stat = current_time;
 
     while (g_running) {
         const double new_time = netcode::Timer::now_seconds();
@@ -130,7 +154,6 @@ int main(int argc, char* argv[]) {
                     }
                     game::FireCommand fire{};
                     std::memcpy(&fire, msg.payload.data() + 1, sizeof(fire));
-
                     std::vector<game::EntityState> interp;
                     const std::vector<game::EntityState>* rewound =
                         world_history.get_at_tick(fire.view_server_tick);
@@ -146,11 +169,6 @@ int main(int argc, char* argv[]) {
                                                {fire.aim_x, fire.aim_y}, *rewound,
                                                it->second.entity_id, HIT_RADIUS);
                     }
-                    std::cout << "[Server] Fire (client tick " << fire.client_tick
-                              << "): " << (result.hit ? "HIT" : "MISS");
-                    if (result.hit) std::cout << " entity " << result.target_id;
-                    std::cout << "\n";
-
                     game::HitNotification note{fire.client_tick, result.hit ? uint8_t{1} : uint8_t{0},
                                                result.target_id, result.point.x, result.point.y};
                     std::vector<uint8_t> reply(1 + sizeof(note));
@@ -167,7 +185,11 @@ int main(int argc, char* argv[]) {
             accumulator -= tick_dt;
 
             const float t = static_cast<float>(current_time - start_time);
-            world[BOT_ID].position = {60.0f * std::sin(t * 2.0f), 0.0f};
+            for (int i = 0; i < NUM_BOTS; ++i) {
+                const uint32_t id = BOT_BASE_ID + static_cast<uint32_t>(i);
+                world[id].position = {kBots[i].amplitude * std::sin(t * kBots[i].frequency + kBots[i].phase),
+                                      kBots[i].lane_y};
+            }
 
             std::vector<game::EntityState> current;
             current.reserve(world.size());
@@ -175,18 +197,16 @@ int main(int argc, char* argv[]) {
             world_history.record(current_time, server_tick, current);
 
             if (server_tick % SNAPSHOT_RATE == 0) {
-                snapshot_history[server_tick] = current;
-                while (snapshot_history.size() > MAX_SNAPSHOT_HISTORY) {
-                    snapshot_history.erase(snapshot_history.begin());
-                }
                 static const std::vector<game::EntityState> kEmpty;
                 for (auto& [addr, s] : clients) {
                     if (!s.connection->is_connected()) continue;
+                    std::vector<game::EntityState> visible = game::compute_visible_set(
+                        s.entity_id, current, AOI_RADIUS, AOI_MAX_ENTITIES);
                     const std::vector<game::EntityState>* baseline = nullptr;
                     uint32_t baseline_tick = 0;
                     if (s.baseline_tick != 0) {
-                        auto hit = snapshot_history.find(s.baseline_tick);
-                        if (hit != snapshot_history.end()) {
+                        auto hit = s.sent_history.find(s.baseline_tick);
+                        if (hit != s.sent_history.end()) {
                             baseline = &hit->second;
                             baseline_tick = s.baseline_tick;
                         }
@@ -194,9 +214,15 @@ int main(int argc, char* argv[]) {
                     game::SnapshotWireHeader hdr{server_tick, s.last_processed_input_tick,
                                                  baseline_tick};
                     std::vector<uint8_t> snap =
-                        game::encode_delta_snapshot(hdr, current, baseline ? *baseline : kEmpty);
+                        game::encode_delta_snapshot(hdr, visible, baseline ? *baseline : kEmpty);
                     s.connection->send_message(game::CH_STATE, snap.data(), snap.size(),
                                                current_time);
+                    vis_sum += visible.size();
+                    ++vis_count;
+                    s.sent_history[server_tick] = std::move(visible);
+                    while (s.sent_history.size() > MAX_SNAPSHOT_HISTORY) {
+                        s.sent_history.erase(s.sent_history.begin());
+                    }
                 }
             }
         }
@@ -209,6 +235,15 @@ int main(int argc, char* argv[]) {
             } else {
                 ++it;
             }
+        }
+
+        if (current_time - last_stat >= 2.0) {
+            const double avg = vis_count ? double(vis_sum) / double(vis_count) : 0.0;
+            std::cout << "[Server] Tick: " << server_tick << " | World entities: " << world.size()
+                      << " | Avg visible/client: " << std::fixed << std::setprecision(1) << avg
+                      << "\n";
+            vis_sum = vis_count = 0;
+            last_stat = current_time;
         }
         netcode::Timer::sleep_ms(1.0);
     }
