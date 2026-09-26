@@ -3,8 +3,10 @@
 #include "game/GameTypes.hpp"
 #include "game/InterestManagement.hpp"
 #include "game/LagCompensation.hpp"
+#include "game/SimConfig.hpp"
 #include "game/Simulation.hpp"
 #include "net/Connection.hpp"
+#include "net/NetworkSimulator.hpp"
 #include "net/ReliableOrderedChannel.hpp"
 #include "net/Socket.hpp"
 #include "net/UnreliableSequencedChannel.hpp"
@@ -60,6 +62,7 @@ struct ClientSession {
     uint32_t last_processed_input_tick{0};
     uint32_t baseline_tick{0};
     std::map<uint32_t, std::vector<game::EntityState>> sent_history;  // per-client baselines
+    std::unique_ptr<netcode::NetworkSimulator> sim;  // optional outgoing impairment
 };
 }  // namespace
 
@@ -73,8 +76,16 @@ int main(int argc, char* argv[]) {
     netcode::Socket socket;
     if (!socket.open(port)) return 1;
 
-    std::cout << "=== Game Netcode Server (Milestone 8: interest management) ===\n";
+    std::cout << "=== Game Netcode Server (Milestone 9: network simulator) ===\n";
     std::cout << "Listening on port " << port << "\n";
+
+    const netcode::NetworkSimulatorConfig sim_cfg = game::read_sim_config_from_env();
+    const bool use_sim = game::sim_enabled(sim_cfg);
+    if (use_sim) {
+        std::cout << "[Server] Network simulation ON (server->client): " << sim_cfg.latency_ms
+                  << "ms +/-" << sim_cfg.jitter_ms << "ms, loss " << (sim_cfg.packet_loss_rate * 100.0f)
+                  << "%, dup " << (sim_cfg.duplicate_rate * 100.0f) << "%\n";
+    }
 
     std::unordered_map<netcode::Address, ClientSession> clients;
     std::unordered_map<uint32_t, game::EntityState> world;
@@ -117,6 +128,10 @@ int main(int argc, char* argv[]) {
                 ClientSession s;
                 s.connection = std::move(conn);
                 s.entity_id = eid;
+                if (use_sim) {
+                    s.sim = std::make_unique<netcode::NetworkSimulator>(socket, sim_cfg);
+                    s.connection->set_network_simulator(s.sim.get());
+                }
                 it = clients.emplace(sender, std::move(s)).first;
             }
 
@@ -229,6 +244,7 @@ int main(int argc, char* argv[]) {
 
         for (auto it = clients.begin(); it != clients.end();) {
             it->second.connection->update(current_time);
+            if (it->second.sim) it->second.sim->update(current_time);
             if (it->second.connection->state() == netcode::ConnectionState::Disconnected) {
                 world.erase(it->second.entity_id);
                 it = clients.erase(it);

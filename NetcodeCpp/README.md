@@ -73,3 +73,11 @@ become per-client (the exact visible subset each client acked).
 
 - Files: `src/game/InterestManagement`
 - Test:  `make test` (adds aoi_test)  |  Run: `make run` (client Visible count rises/falls)
+
+## Milestone 9 - Network simulator in the live loop
+Connection can route outgoing packets through the NetworkSimulator (latency,
+jitter, loss, duplication) so every earlier technique can be seen working under a
+bad network. Configured by env vars; both sides can be impaired.
+
+- Files: `src/game/SimConfig` (+ Connection hook)
+- Test:  `make test` (adds netsim_test)  |  Run: `make run-sim`

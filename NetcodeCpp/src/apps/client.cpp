@@ -2,8 +2,10 @@
 #include "game/DeltaSnapshot.hpp"
 #include "game/GameTypes.hpp"
 #include "game/InputHistory.hpp"
+#include "game/SimConfig.hpp"
 #include "game/Simulation.hpp"
 #include "net/Connection.hpp"
+#include "net/NetworkSimulator.hpp"
 #include "net/ReliableOrderedChannel.hpp"
 #include "net/Socket.hpp"
 #include "net/UnreliableSequencedChannel.hpp"
@@ -16,6 +18,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -81,7 +84,14 @@ int main(int argc, char* argv[]) {
     conn.create_channel<netcode::UnreliableSequencedChannel>(game::CH_STATE);
     conn.create_channel<netcode::ReliableOrderedChannel>(game::CH_RELIABLE);
 
-    std::cout << "=== Game Netcode Client (Milestone 8: interest management) ===\n";
+    const netcode::NetworkSimulatorConfig sim_cfg = game::read_sim_config_from_env();
+    std::unique_ptr<netcode::NetworkSimulator> sim;
+    if (game::sim_enabled(sim_cfg)) {
+        sim = std::make_unique<netcode::NetworkSimulator>(socket, sim_cfg);
+        conn.set_network_simulator(sim.get());
+    }
+
+    std::cout << "=== Game Netcode Client (Milestone 9: network simulator) ===\n";
     std::cout << "Connecting to " << server_addr.to_string() << "\n";
 
     double current_time = netcode::Timer::now_seconds();
@@ -208,6 +218,7 @@ int main(int argc, char* argv[]) {
         }
 
         conn.update(current_time);
+        if (sim) sim->update(current_time);
         if (conn.state() == netcode::ConnectionState::Disconnected) {
             std::cout << "[Client] Disconnected.\n";
             break;
