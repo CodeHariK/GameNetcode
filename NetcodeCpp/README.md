@@ -25,3 +25,11 @@ with heartbeats and timeouts.
 
 - Files: `src/net/{PacketHeader,ReliabilitySystem,Connection}`
 - Test:  `make test` (adds protocol_test)
+
+## Milestone 3 - Channels (delivery guarantees)
+Three delivery channels multiplexed into one datagram: UnreliableUnordered
+(fire-and-forget), UnreliableSequenced (drop old), ReliableOrdered (retransmit +
+in-order). Connection now packs/unpacks channel messages.
+
+- Files: `src/net/{Channel,ChannelTypes,UnreliableUnordered,UnreliableSequenced,ReliableOrdered}Channel`
+- Test:  `make test` (adds channel_test)

@@ -5,7 +5,7 @@ CXXFLAGS ?= -std=c++20 -Wall -Wextra -O3 -Isrc
 LIB_SRCS = src/net/Address.cpp src/net/Socket.cpp src/net/NetworkSimulator.cpp \
            src/net/ReliabilitySystem.cpp src/net/Connection.cpp
 
-TESTS = bin/sim_test bin/protocol_test
+TESTS = bin/sim_test bin/protocol_test bin/channel_test
 
 .PHONY: test clean
 test: $(TESTS)

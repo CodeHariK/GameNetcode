@@ -1,5 +1,6 @@
 #include "Connection.hpp"
 
+#include <arpa/inet.h>
 #include <cstring>
 #include <iostream>
 #include <vector>
@@ -11,8 +12,16 @@ Connection::Connection(Socket& socket, double timeout_sec, double heartbeat_inte
       timeout_sec_(timeout_sec),
       heartbeat_interval_sec_(heartbeat_interval_sec),
       reliability_(1024) {
-    // No channels yet (Milestone 3); keep the ack callback a harmless no-op.
-    reliability_.set_ack_callback([](uint16_t) {});
+    setup_callbacks();
+}
+
+void Connection::setup_callbacks() {
+    // When an underlying UDP packet is acknowledged, inform all channels.
+    reliability_.set_ack_callback([this](uint16_t packet_seq) {
+        for (auto& [ch_id, channel] : channels_) {
+            channel->on_packet_acked(packet_seq);
+        }
+    });
 }
 
 void Connection::connect(const Address& address, double current_time) {
@@ -36,6 +45,23 @@ void Connection::disconnect(double /*current_time*/) {
     reliability_.reset();
 }
 
+bool Connection::send_message(uint8_t channel_id,
+                              const void* data,
+                              size_t size,
+                              double current_time) {
+    auto* ch = get_channel(channel_id);
+    if (!ch) return false;
+    ch->send_message(data, size, current_time);
+    return true;
+}
+
+bool Connection::receive_message(Message& out_message) {
+    for (auto& [ch_id, channel] : channels_) {
+        if (channel->receive_message(out_message)) return true;
+    }
+    return false;
+}
+
 bool Connection::send_packet(const void* payload, size_t size, double current_time) {
     if (state_ == ConnectionState::Disconnected) return false;
 
@@ -48,6 +74,50 @@ bool Connection::send_packet(const void* payload, size_t size, double current_ti
     }
 
     const bool sent = socket_.send(remote_address_, buffer.data(), buffer.size());
+    if (sent) last_packet_sent_time_ = current_time;
+    return sent;
+}
+
+bool Connection::flush_channels(double current_time) {
+    if (state_ == ConnectionState::Disconnected) return false;
+
+    bool has_data = false;
+    for (const auto& [ch_id, ch] : channels_) {
+        if (ch->has_outgoing_messages()) {
+            has_data = true;
+            break;
+        }
+    }
+    if (!has_data) return false;
+
+    constexpr size_t MAX_PACKET_SIZE = 1200;  // safe game MTU
+    std::vector<uint8_t> buffer(MAX_PACKET_SIZE);
+
+    PacketHeader header;
+    reliability_.generate_packet_header(header, current_time);
+    header.serialize(buffer.data());
+
+    const size_t payload_offset = PacketHeader::HEADER_SIZE;
+    const size_t max_payload = MAX_PACKET_SIZE - payload_offset;
+
+    for (auto& [ch_id, ch] : channels_) {
+        if (ch->type() == ChannelType::ReliableOrdered) {
+            static_cast<ReliableOrderedChannel*>(ch.get())->set_current_packet_sequence(header.sequence);
+        }
+    }
+
+    size_t total_payload_written = 0;
+    for (auto& [ch_id, ch] : channels_) {
+        if (total_payload_written >= max_payload) break;
+        total_payload_written +=
+            ch->write_outgoing_messages(buffer.data() + payload_offset + total_payload_written,
+                                        max_payload - total_payload_written,
+                                        current_time);
+    }
+    if (total_payload_written == 0) return false;
+
+    const size_t packet_size = PacketHeader::HEADER_SIZE + total_payload_written;
+    const bool sent = socket_.send(remote_address_, buffer.data(), packet_size);
     if (sent) last_packet_sent_time_ = current_time;
     return sent;
 }
@@ -68,8 +138,36 @@ bool Connection::process_packet(const Address& sender,
     last_packet_received_time_ = current_time;
     if (state_ == ConnectionState::Connecting) state_ = ConnectionState::Connected;
 
-    out_raw_payload = data + PacketHeader::HEADER_SIZE;
-    out_raw_payload_bytes = size - PacketHeader::HEADER_SIZE;
+    const uint8_t* payload = data + PacketHeader::HEADER_SIZE;
+    const size_t payload_bytes = size - PacketHeader::HEADER_SIZE;
+
+    size_t offset = 0;
+    bool parsed_any_channel_message = false;
+    while (offset + MessageHeader::HEADER_SIZE <= payload_bytes) {
+        const uint8_t ch_id = payload[offset];
+        uint16_t msg_id;
+        uint16_t msg_len;
+        std::memcpy(&msg_id, payload + offset + 1, 2);
+        std::memcpy(&msg_len, payload + offset + 3, 2);
+        msg_id = ntohs(msg_id);
+        msg_len = ntohs(msg_len);
+
+        if (offset + MessageHeader::HEADER_SIZE + msg_len > payload_bytes) break;
+
+        if (auto* ch = get_channel(ch_id)) {
+            ch->process_incoming_message(msg_id, payload + offset + MessageHeader::HEADER_SIZE, msg_len);
+            parsed_any_channel_message = true;
+        }
+        offset += MessageHeader::HEADER_SIZE + msg_len;
+    }
+
+    if (!parsed_any_channel_message) {
+        out_raw_payload = payload;
+        out_raw_payload_bytes = payload_bytes;
+    } else {
+        out_raw_payload = nullptr;
+        out_raw_payload_bytes = 0;
+    }
     return true;
 }
 
@@ -87,10 +185,15 @@ void Connection::update(double current_time) {
         return;
     }
 
+    flush_channels(current_time);
+
     if (current_time - last_packet_sent_time_ >= heartbeat_interval_sec_) {
         send_heartbeat(current_time);
     }
 
+    for (auto& [ch_id, ch] : channels_) {
+        ch->update(current_time, reliability_.rtt_ms());
+    }
     reliability_.update(current_time);
 }
 

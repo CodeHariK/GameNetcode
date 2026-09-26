@@ -1,12 +1,18 @@
 #pragma once
 
 #include "Address.hpp"
+#include "Channel.hpp"
 #include "PacketHeader.hpp"
 #include "ReliabilitySystem.hpp"
+#include "ReliableOrderedChannel.hpp"
 #include "Socket.hpp"
+#include "UnreliableSequencedChannel.hpp"
+#include "UnreliableUnorderedChannel.hpp"
 
-#include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <unordered_map>
+#include <vector>
 
 namespace netcode {
 
@@ -27,25 +33,38 @@ inline const char* connection_state_to_string(ConnectionState state) {
 }
 
 /**
- * Connection manages a virtual client-server session over UDP: a state machine
- * (Disconnected -> Connecting -> Connected), keep-alive heartbeats, inactivity
- * timeouts, and packet-level reliability (sequence / ack / ack-bits, RTT, loss).
- *
- * Milestone 2: raw packets only. Channels (Milestone 3) and the network
- * simulator hook (Milestone 9) are layered on in later steps.
+ * Connection manages a virtual client-server session over UDP: state machine,
+ * heartbeats, timeouts, packet reliability, and (Milestone 3) multiplexing of
+ * several delivery channels (Unreliable, Sequenced, Reliable-Ordered) into a
+ * single UDP datagram.
  */
 class Connection {
 public:
     Connection(Socket& socket, double timeout_sec = 5.0, double heartbeat_interval_sec = 0.25);
 
+    template <typename T, typename... Args>
+    T* create_channel(uint8_t channel_id, Args&&... args) {
+        auto ch = std::make_unique<T>(channel_id, std::forward<Args>(args)...);
+        T* ptr = ch.get();
+        channels_[channel_id] = std::move(ch);
+        return ptr;
+    }
+
+    Channel* get_channel(uint8_t channel_id) {
+        auto it = channels_.find(channel_id);
+        return (it != channels_.end()) ? it->second.get() : nullptr;
+    }
+
     void connect(const Address& address, double current_time);
     void accept(const Address& address, double current_time);
     void disconnect(double current_time);
 
-    // Send a raw payload wrapped in a reliability header.
-    bool send_packet(const void* payload, size_t size, double current_time);
+    bool send_message(uint8_t channel_id, const void* data, size_t size, double current_time);
+    bool receive_message(Message& out_message);
 
-    // Feed received wire data in; exposes the raw payload (after the header).
+    bool send_packet(const void* payload, size_t size, double current_time);
+    bool flush_channels(double current_time);
+
     bool process_packet(const Address& sender,
                         const uint8_t* data,
                         size_t size,
@@ -53,7 +72,6 @@ public:
                         size_t& out_raw_payload_bytes,
                         double current_time);
 
-    // Call every frame to handle timeouts, heartbeats, and RTT/loss.
     void update(double current_time);
 
     [[nodiscard]] ConnectionState state() const { return state_; }
@@ -66,6 +84,7 @@ public:
 
 private:
     void send_heartbeat(double current_time);
+    void setup_callbacks();
 
     Socket& socket_;
     Address remote_address_;
@@ -77,6 +96,7 @@ private:
     double last_packet_received_time_{0.0};
 
     ReliabilitySystem reliability_;
+    std::unordered_map<uint8_t, std::unique_ptr<Channel>> channels_;
 };
 
 }  // namespace netcode
